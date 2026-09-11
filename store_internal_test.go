@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,11 +15,29 @@ import (
 )
 
 func TestStore_CloseFlushesBeforeInterruptibleMonitorWait(t *testing.T) {
+	testStoreCloseBlockedSnapshot(t, false)
+}
+
+func TestStore_CloseFlushesBeforeAbortingSnapshotTransport(t *testing.T) {
+	testStoreCloseBlockedSnapshot(t, true)
+}
+
+func testStoreCloseBlockedSnapshot(t *testing.T, abortTransport bool) {
+	t.Helper()
 	client := newBlockingSnapshotClient(t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "db")
 	db := NewDB(dbPath)
 	db.MonitorInterval = 0
-	db.Replica = NewReplicaWithClient(db, client)
+	var abortedBeforeClose atomic.Bool
+	var replicaClient ReplicaClient = client
+	if abortTransport {
+		replicaClient = &abortingSnapshotClient{blockingSnapshotClient: client, onAbort: func() {
+			if db.IsOpen() {
+				abortedBeforeClose.Store(true)
+			}
+		}}
+	}
+	db.Replica = NewReplicaWithClient(db, replicaClient)
 	db.Replica.MonitorEnabled = false
 	if err := db.Open(); err != nil {
 		t.Fatal(err)
@@ -104,6 +123,22 @@ func TestStore_CloseFlushesBeforeInterruptibleMonitorWait(t *testing.T) {
 		t.Fatalf("replica txid=%s, want %s", got, afterTXID)
 	}
 
+	if abortTransport {
+		select {
+		case err := <-closeResult:
+			if err != nil {
+				t.Fatalf("Store.Close after transport abort: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Store.Close did not abort the snapshot transport")
+		}
+		if abortedBeforeClose.Load() {
+			t.Fatal("transport aborted before database cleanup completed")
+		}
+		cleaned = true
+		return
+	}
+
 	select {
 	case err := <-closeResult:
 		t.Fatalf("Store.Close returned before the second signal: %v", err)
@@ -174,3 +209,12 @@ func (c *blockingSnapshotClient) WriteLTXFile(ctx context.Context, level int, mi
 func (c *blockingSnapshotClient) unblock() {
 	c.unblockOnce.Do(func() { close(c.unblockCh) })
 }
+
+// abortingSnapshotClient releases the same blocked upload through the optional
+// transport interface, without requiring a second shutdown signal.
+type abortingSnapshotClient struct {
+	*blockingSnapshotClient
+	onAbort func()
+}
+
+func (c *abortingSnapshotClient) Abort() { c.onAbort(); c.unblock() }
