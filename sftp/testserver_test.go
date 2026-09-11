@@ -26,6 +26,7 @@ const (
 	serveFully                         // a working server
 	countConcurrentWrites              // a working server that counts overlapping WRITEs
 	stallAtReadDir                     // answers until the first READDIR, then goes quiet
+	stallAtRead                        // serves uploads and OPENs, then ignores the first READ
 )
 
 // testServer is an SSH/SFTP server that can be made to stop answering at a
@@ -216,6 +217,12 @@ func serveSSH(conn net.Conn, config *gossh.ServerConfig, mode stall, root string
 					rw = &stopAtWrite{r: ch, w: ch, stop: stop, seen: srv.writeReached}
 				case stallAtReadDir:
 					rw = &stopAtWrite{r: ch, w: ch, kind: fxpReadDir, stop: stop, seen: srv.writeReached}
+				case stallAtRead:
+					// A separate signal from writeReached: this mode lets
+					// uploads through, so a test has to wait on the READ
+					// rather than on a write that was always going to
+					// succeed.
+					rw = &stopAtWrite{r: ch, w: ch, kind: fxpRead, stop: stop, seen: srv.reached}
 				case countConcurrentWrites:
 					srv.counter.r, srv.counter.w = ch, ch
 					rw = srv.counter
@@ -259,6 +266,7 @@ type stopAtWrite struct {
 }
 
 const (
+	fxpRead    = 5  // SSH_FXP_READ
 	fxpWrite   = 6  // SSH_FXP_WRITE
 	fxpReadDir = 12 // SSH_FXP_READDIR
 )
