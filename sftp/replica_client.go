@@ -1,6 +1,7 @@
 package sftp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -714,11 +715,37 @@ func (c *ReplicaClient) OpenLTXFile(ctx context.Context, level int, minTXID, max
 
 	internal.OperationTotalCounterVec.WithLabelValues(ReplicaClientType, "GET").Inc()
 
-	if size > 0 {
-		return internal.LimitReadCloser(f, size), nil
-	}
-	return f, nil
+	return newBufferedFile(f, size), nil
 }
+
+// readAheadBufferSize is the read-ahead applied to an opened LTX file. The LTX
+// decoder reads a 100-byte header and a 6-byte header per page, and the SFTP
+// client turns every read that fits in one packet into its own round trip, so
+// the reader is buffered to keep those reads off the wire.
+const readAheadBufferSize = 256 << 10
+
+// newBufferedFile returns f with read-ahead, limited to size bytes when size is
+// positive. The limit is applied beneath the buffer so read-ahead never reads
+// past the end of the requested range, and Close still closes f.
+func newBufferedFile(f io.ReadCloser, size int64) io.ReadCloser {
+	var r io.Reader = f
+	bufSize := readAheadBufferSize
+	if size > 0 {
+		r = internal.LimitReadCloser(f, size)
+		if size < int64(bufSize) {
+			bufSize = int(size)
+		}
+	}
+	return &bufferedFile{Reader: bufio.NewReaderSize(r, bufSize), closer: f}
+}
+
+// bufferedFile reads through a buffer and closes the file it was built from.
+type bufferedFile struct {
+	*bufio.Reader
+	closer io.Closer
+}
+
+func (f *bufferedFile) Close() error { return f.closer.Close() }
 
 // DeleteLTXFiles deletes LTX files with at the given positions.
 func (c *ReplicaClient) DeleteLTXFiles(ctx context.Context, a []*ltx.FileInfo) (err error) {
