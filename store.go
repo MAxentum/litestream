@@ -262,7 +262,14 @@ func (s *Store) Close(ctx context.Context) (err error) {
 	s.mu.Unlock()
 
 	for _, db := range dbs {
-		if e := db.Close(ctx); e != nil {
+		// Each database bounds its own final sync, and backs that bound with a
+		// transport teardown from inside syncReplicaWithRetry — where the
+		// budget actually starts. Nothing here imposes a second clock over the
+		// sequence: closing is sequential, so one would spend the first
+		// database's time out of the last database's budget.
+		e := db.Close(ctx)
+
+		if e != nil {
 			if errors.Is(e, ErrShutdownInterrupted) {
 				if err == nil {
 					err = e
@@ -273,8 +280,23 @@ func (s *Store) Close(ctx context.Context) (err error) {
 		}
 	}
 
-	// Cancel and wait for background tasks to complete.
+	// Cancel background work, then tear the transports down before waiting on
+	// it.
+	//
+	// Cancellation alone is not enough: a background task blocked in a network
+	// round trip cannot observe the context. A compaction uploading an LTX file
+	// over SFTP sits in the client library waiting for a response packet, so
+	// waiting here first hangs for as long as the peer stays silent.
+	//
+	// This is unconditional and terminal: every final sync above has already
+	// finished or failed, and the store is being closed. It does not imply
+	// those syncs succeeded — db.Close reports that for each database.
 	s.cancel()
+	for _, db := range dbs {
+		if db.Replica != nil && db.Replica.Client != nil {
+			AbortReplicaClient(db.Replica.Client)
+		}
+	}
 	s.wg.Wait()
 
 	return err
@@ -590,13 +612,20 @@ func (s *Store) monitorCompactionLevel(ctx context.Context, lvl *CompactionLevel
 			case errors.Is(err, ErrDBNotReady):
 				db.Logger.Debug("db not ready, skipping", "level", lvl.Level, "path", db.Path(), "error", err)
 				notReadyDBs = append(notReadyDBs, db.Path())
+			case errors.Is(err, ErrClientAborted):
+				// A compaction interrupted by shutdown is routine: it is redone
+				// on the next start and nothing is lost. An interrupted final
+				// sync is a different matter and stays visible — db.Close
+				// reports it per database.
+				db.Logger.Debug("compaction interrupted by shutdown", "level", lvl.Level)
 			case err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
 				db.Logger.Error("compaction failed", "level", lvl.Level, "error", err)
 			}
 
 			if lvl.Level == SnapshotLevel {
 				if err := s.EnforceSnapshotRetention(ctx, db); err != nil &&
-					!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+					!errors.Is(err, ErrClientAborted) {
 					db.Logger.Error("retention enforcement failed", "error", err)
 				}
 			}

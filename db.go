@@ -189,6 +189,13 @@ type DB struct {
 
 	// Where to send log messages, defaults to global slog with database epath.
 	Logger *slog.Logger
+
+	// backstopStarted, when set, runs as the transport backstop's watcher
+	// goroutine begins. Test-only seam, per database rather than per process:
+	// it lets a test hold the watcher at its start to reach the ordering where
+	// an abort falls due before the watcher can observe it. Set it before the
+	// database is opened; never from production code.
+	backstopStarted func()
 }
 
 // syncState holds mutable sync-tracking fields extracted from DB.
@@ -877,6 +884,88 @@ func (db *DB) Close(ctx context.Context) (err error) {
 	return err
 }
 
+// backstopReplicaTransport closes the replica's transport when the final-sync
+// deadline expires or the shutdown is interrupted, and returns a function that
+// stops the watch and waits for it to finish.
+//
+// Ownership: only the transport is touched; the replica client itself stays
+// usable to the extent its implementation allows, and a client that does not
+// implement the aborter interface is unaffected.
+func (db *DB) backstopReplicaTransport(syncCtx context.Context) (stop func()) {
+	if db.Replica == nil || db.Replica.Client == nil {
+		return func() {}
+	}
+
+	// ⛔ Resolve the aborter ONCE, here. A client that cannot be aborted used
+	// to get a watcher goroutine and a warning announcing a teardown that
+	// never happened — the file and s3 clients logged "closing replica
+	// transport" on every timed-out shutdown and closed nothing.
+	aborter, ok := db.Replica.Client.(ReplicaClientAborter)
+	if !ok {
+		return func() {}
+	}
+
+	// ⛔ At most one abort and one warning, however many reasons arrive. The
+	// watcher and the stop path can both find an abort owed, and stop itself
+	// can find BOTH the sync context and db.Done closed — three routes to the
+	// same terminal act, which is one act.
+	var abortOnce sync.Once
+	abort := func(reason string) {
+		abortOnce.Do(func() {
+			db.Logger.Warn("closing replica transport", "reason", reason)
+			aborter.Abort()
+		})
+	}
+
+	done := make(chan struct{})
+	finished := make(chan struct{})
+
+	go func() {
+		defer close(finished)
+		if db.backstopStarted != nil {
+			db.backstopStarted()
+		}
+		select {
+		case <-done:
+			// Stopped by the caller: the sync finished on its own.
+		case <-db.Done:
+			abort("shutdown interrupted")
+		case <-syncCtx.Done():
+			// Any end of the sync context, deadline or cancellation. A
+			// cancelled parent is not a reason to leave a stuck transport
+			// alone: the final sync cannot proceed either way, and nothing
+			// downstream can reach the blocked call — Store.Close's own abort
+			// only runs after DB.Close returns, which is what is stuck.
+			abort("final sync ended: " + syncCtx.Err().Error())
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			// A stop that races a due abort must not cancel it. Both channels
+			// can be ready at once — the deadline expires and the semaphore
+			// wait returns — and select would be free to take either. Decide
+			// it here instead: if the abort was already owed, perform it.
+			select {
+			case <-syncCtx.Done():
+				abort("final sync ended: " + syncCtx.Err().Error())
+			default:
+			}
+			select {
+			case <-db.Done:
+				abort("shutdown interrupted")
+			default:
+			}
+			close(done)
+		})
+		// Join: closing the channel does not prove the goroutine has finished,
+		// and an abort already in progress must complete before the caller
+		// treats shutdown as over.
+		<-finished
+	}
+}
+
 // syncReplicaWithRetry attempts to sync the replica with retry logic for shutdown.
 // It retries until success, timeout, or context cancellation. If db.Done is non-nil,
 // closing it cancels any in-flight sync attempt and exits the retry loop.
@@ -889,9 +978,17 @@ func (db *DB) syncReplicaWithRetry(ctx context.Context) error {
 	timeout := db.ShutdownSyncTimeout
 	interval := db.ShutdownSyncInterval
 
-	// If timeout is zero, just try once (no retry)
+	// A zero timeout means one attempt with no retry. It must not also mean
+	// that the attempt cannot be interrupted: a single upload can block for
+	// ever just as easily as the first of several.
 	if timeout == 0 {
-		return db.Replica.Sync(ctx)
+		syncCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		stopBackstop := db.backstopReplicaTransport(syncCtx)
+		defer stopBackstop()
+
+		return db.Replica.Sync(syncCtx)
 	}
 
 	// Use default interval if not set
@@ -902,6 +999,17 @@ func (db *DB) syncReplicaWithRetry(ctx context.Context) error {
 	// Create deadline context for total retry duration.
 	deadlineCtx, deadlineCancel := context.WithTimeout(ctx, timeout)
 	defer deadlineCancel()
+
+	// Back the deadline with a transport teardown.
+	//
+	// The deadline and the Done channel are only observed between attempts: an
+	// attempt blocked inside a replica client that does not take a context —
+	// an SFTP write waiting for its response packet — reaches neither. Closing
+	// the transport is what makes those bounds real, and it starts here, where
+	// the budget itself starts, rather than at the top of DB.Close where local
+	// work has not happened yet.
+	stopBackstop := db.backstopReplicaTransport(deadlineCtx)
+	defer stopBackstop()
 
 	// If db.Done is set, derive a context that cancels when done is closed
 	// so that in-flight Replica.Sync calls are interrupted immediately.
@@ -948,6 +1056,17 @@ func (db *DB) syncReplicaWithRetry(ctx context.Context) error {
 			return nil
 		} else {
 			lastErr = err
+
+			// An aborted client is terminal: it refuses to reconnect, so
+			// further attempts cannot succeed and would spend the rest of the
+			// budget failing. Checked here rather than at the top of the loop
+			// so it does not first log a retry and sleep an interval.
+			if errors.Is(err, ErrClientAborted) {
+				db.Logger.Warn("shutdown sync abandoned: replica transport closed",
+					"attempts", attempt,
+					"duration", time.Since(startTime))
+				return fmt.Errorf("after %d attempts: %w", attempt, err)
+			}
 		}
 
 		// Check if we should stop retrying (done signal or timeout)
@@ -2917,7 +3036,14 @@ func (db *DB) Compact(ctx context.Context, dstLevel int) (*ltx.FileInfo, error) 
 	if dstLevel == 1 {
 		if err := db.EnforceL0RetentionByTime(ctx); err != nil {
 			// Don't log context cancellation errors during shutdown
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			switch {
+			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+				// Shutting down; nothing to report.
+			case errors.Is(err, ErrClientAborted):
+				// Retention is background maintenance and is redone on the next
+				// start, so an interrupted run is routine.
+				db.Logger.Debug("l0 retention interrupted by shutdown")
+			default:
 				db.Logger.Error("enforce L0 time retention", "error", err)
 			}
 		}
