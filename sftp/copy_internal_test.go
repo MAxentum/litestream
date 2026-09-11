@@ -25,14 +25,13 @@ func (w *readerFromWriter) ReadFrom(r io.Reader) (int64, error) {
 }
 
 // TestRemoteWriter_UsesReadFrom asserts that io.Copy still reaches the
-// destination's optimised path through the wrapper. Asserting that an upload
-// merely succeeds cannot see this: the slow path succeeds too.
+// Destination's optimised path through the wrapper. Asserting that an upload
+// Merely succeeds cannot see this: the slow path succeeds too.
 func TestRemoteWriter_UsesReadFrom(t *testing.T) {
 	dst := &readerFromWriter{}
-	// ⛔ The source must NOT implement io.WriterTo. io.Copy asks the SOURCE
-	// first and only then the destination, so a *strings.Reader (which has
-	// WriteTo) never consults the destination at all — the first version of
-	// this test used one and "proved" the fast path was unreachable.
+	// The source must not implement io.WriterTo: io.Copy asks the source
+	// First, so a reader with WriteTo never consults the destination and the
+	// Dispatch under test is never exercised.
 	n, err := io.Copy(remoteWriter{w: dst}, plainReader(strings.NewReader("hello")))
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +45,8 @@ func TestRemoteWriter_UsesReadFrom(t *testing.T) {
 }
 
 // TestRemoteWriter_AttributesThroughReadFrom asserts that the reason the
-// wrapper exists survives the fast path: a failure in the caller's stream is
-// not reported as the transport failing.
+// Wrapper exists survives the fast path: a failure in the caller's stream is
+// Not reported as the transport failing.
 func TestRemoteWriter_AttributesThroughReadFrom(t *testing.T) {
 	boom := errors.New("source failed")
 	dst := &readerFromWriter{}
@@ -72,5 +71,5 @@ type errReader struct{ err error }
 
 func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
-// plainReader strips any WriteTo method from a reader.
+// PlainReader strips any WriteTo method from a reader.
 func plainReader(r io.Reader) io.Reader { return struct{ io.Reader }{r} }

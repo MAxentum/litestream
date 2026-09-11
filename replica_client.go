@@ -16,12 +16,12 @@ import (
 var ErrStopIter = errors.New("stop iterator")
 
 // ErrClientAborted is returned by a replica client whose transport was torn
-// down by Abort, and wraps whatever the transport itself reported.
+// Down by Abort, and wraps whatever the transport itself reported.
 //
 // It says how an operation ended, not whether that matters. Background work
-// interrupted this way — a compaction, a retention pass — is redone on the next
-// start and can be logged quietly; an interrupted final sync means recent
-// commits may not have reached the replica and must stay visible.
+// Interrupted this way — a compaction, a retention pass — is redone on the next
+// Start and can be logged quietly; an interrupted final sync means recent
+// Commits may not have reached the replica and must stay visible.
 var ErrClientAborted = errors.New("replica client aborted")
 
 // ReplicaClient represents client to connect to a Replica.
@@ -60,16 +60,16 @@ type ReplicaClient interface {
 }
 
 // ReplicaClientAborter is an optional interface for replica clients that hold a
-// network transport of their own.
+// Network transport of their own.
 //
 // Abort tears that transport down so that operations already blocked inside it
-// fail immediately. It exists because context cancellation cannot reach a call
-// that is parked in a library without context support: an SFTP write waiting
-// for its response packet observes nothing but the connection dropping.
+// Fail immediately. It exists because context cancellation cannot reach a call
+// That is parked in a library without context support: an SFTP write waiting
+// For its response packet observes nothing but the connection dropping.
 //
 // Abort must be safe to call concurrently with in-flight operations, and a
-// client that has been aborted must not reconnect — it is called during
-// shutdown, where a fresh connection would only be blocked in turn.
+// Client that has been aborted must not reconnect — it is called during
+// Shutdown, where a fresh connection would only be blocked in turn.
 type ReplicaClientAborter interface {
 	Abort()
 }

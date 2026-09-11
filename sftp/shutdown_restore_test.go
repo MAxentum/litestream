@@ -15,18 +15,18 @@ import (
 )
 
 // TestStore_Close_SFTPReplicaRestores asserts the end of the chain over the
-// transport this change is about: a transaction committed immediately before
-// shutdown is present in a restore taken from the SFTP replica afterwards,
-// read back by a NEW client.
+// Transport this change is about: a transaction committed immediately before
+// Shutdown is present in a restore taken from the SFTP replica afterwards,
+// Read back by a new client.
 //
-// ⛔ The equivalent test over the file backend proves the ordering inside
+// The equivalent test over the file backend proves the ordering inside
 // Close. It cannot prove anything about SFTP, which is where the connection
-// ownership, the abort and the error attribution all live — and a fast stop is
-// worth nothing if the last commit did not arrive.
+// Ownership, the abort and the error attribution all live — and a fast stop is
+// Worth nothing if the last commit did not arrive.
 //
-// ⚠ The restore uses a fresh client deliberately: after a terminal Abort the
-// original client refuses to reconnect, so reusing it would test the abort
-// rather than the backup.
+// The restore uses a fresh client deliberately: after a terminal Abort the
+// Original client refuses to reconnect, so reusing it would test the abort
+// Rather than the backup.
 func TestStore_Close_SFTPReplicaRestores(t *testing.T) {
 	srv := startTestServer(t, serveFully)
 
@@ -101,18 +101,18 @@ func TestStore_Close_SFTPReplicaRestores(t *testing.T) {
 }
 
 // TestStore_Close_InterruptedUpload_EarlierBackupRestores asserts the promise
-// that makes a fast shutdown acceptable at all: interrupting an upload costs
-// the newest commit, and nothing else.
+// That makes a fast shutdown acceptable at all: interrupting an upload costs
+// The newest commit, and nothing else.
 //
-// ⛔ A FAST STOP IS ONLY SAFE IF THE PREVIOUS BACKUP SURVIVES IT. Uploads are
-// written to a temporary name and renamed, so an interrupted one must leave no
-// object under its final name and must not damage what was already there. This
-// checks both, and restores through a THIRD client because the interrupted one
-// is terminal.
+// A Fast stop is Only safe if The previous backup survives it. Uploads are
+// Written to a temporary name and renamed, so an interrupted one must leave no
+// Object under its final name and must not damage what was already there. This
+// Checks both, and restores through a third client because the interrupted one
+// Is terminal.
 //
 // Two servers, one directory: the first serves normally and the second stalls
-// at the first WRITE. pkg/sftp resolves absolute paths on the real filesystem,
-// so both act on the same replica path without a new fixture mode.
+// At the first WRITE. Pkg/sftp resolves absolute paths on the real filesystem,
+// So both act on the same replica path without a new fixture mode.
 func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 	good := startTestServer(t, serveFully)
 	stalling := startTestServer(t, stallAtWrite)
@@ -155,7 +155,7 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 	}
 
 	// From here every upload stalls: the transport that carries the next
-	// commit is the one that goes quiet.
+	// Commit is the one that goes quiet.
 	doomed := newClient(t, stalling)
 	doomed.Path = replicaPath
 	db.Replica.Client = doomed
@@ -168,19 +168,19 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ⛔ THE STORE OWNS THESE FIELDS. Store.Open copies its own
-	// ShutdownSyncTimeout and ShutdownSyncInterval ONTO every database it
-	// attaches (store.go), so a value set on the DB beforehand is silently
-	// replaced. Setting it there left this test on the zero-timeout path with
-	// a background parent: no deadline, nothing to cancel, and a backstop
-	// correctly waiting forever for an end that could never come. The hang was
-	// the test's configuration, not the fix.
+	// The store owns these fields. Store.Open copies its own
+	// ShutdownSyncTimeout and ShutdownSyncInterval onto every database it
+	// Attaches (store.go), so a value set on the DB beforehand is silently
+	// Replaced. Setting it there left this test on the zero-timeout path with
+	// A background parent: no deadline, nothing to cancel, and a backstop
+	// Correctly waiting forever for an end that could never come. The hang was
+	// The test's configuration, not the fix.
 	s := litestream.NewStore([]*litestream.DB{db}, litestream.CompactionLevels{{Level: 0}})
 	s.CompactionMonitorEnabled = false
-	// ⚠ And the SETTER, not the field: NewStore copies its defaults onto every
-	// database it is constructed with, so assigning the field afterwards
-	// changes the store and not the databases. SetShutdownSyncTimeout exists
-	// for exactly this and propagates.
+	// And the setter, not the field: NewStore copies its defaults onto every
+	// Database it is constructed with, so assigning the field afterwards
+	// Changes the store and not the databases. SetShutdownSyncTimeout exists
+	// For exactly this and propagates.
 	s.SetShutdownSyncTimeout(2 * time.Second)
 	if err := s.Open(t.Context()); err != nil {
 		t.Fatal(err)
@@ -190,9 +190,9 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 	go func() { closed <- s.Close(context.Background()) }()
 
 	// Prove the stall is where the test says it is. Without this, a Close that
-	// returned for any other reason — a handshake failure, a misconfigured
-	// path — would satisfy everything below and the test would be describing a
-	// scenario that never happened.
+	// Returned for any other reason — a handshake failure, a misconfigured
+	// Path — would satisfy everything below and the test would be describing a
+	// Scenario that never happened.
 	select {
 	case <-stalling.writeReached:
 	case err := <-closed:
@@ -203,9 +203,9 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 
 	select {
 	case err := <-closed:
-		// An interrupted final sync is a FAILED shutdown and must say so. A nil
-		// here would mean Close reported success for work that did not reach
-		// the replica, which is the one thing a backup tool must never do.
+		// An interrupted final sync is a failed shutdown and must say so. A nil
+		// Here would mean Close reported success for work that did not reach
+		// The replica, which is the one thing a backup tool must never do.
 		if err == nil {
 			t.Fatal("Close reported success for a final sync that was interrupted")
 		}
@@ -214,7 +214,7 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 	}
 
 	// The committed set must be unchanged: nothing removed, and nothing new
-	// published under a final name by the upload that was cut off.
+	// Published under a final name by the upload that was cut off.
 	after := committed(t, level0)
 	for name := range before {
 		if _, ok := after[name]; !ok {
@@ -257,12 +257,12 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 		t.Fatalf("integrity_check after an interrupted upload: %s", integrity)
 	}
 
-	// ⛔ AND REPLICATION ACTUALLY RESUMES. Reconnecting and listing files proves
-	// a connection, not replication — the earlier version of this block called
+	// And replication actually resumes. Reconnecting and listing files proves
+	// A connection, not replication — the earlier version of this block called
 	// Init and LTXFiles and claimed resumption on that basis. Reopen the same
-	// database with a fresh client, commit something new, sync it, and prove
-	// the new commit restores. That is what "resumes" has to mean for a backup
-	// tool.
+	// Database with a fresh client, commit something new, sync it, and prove
+	// The new commit restores. That is what "resumes" has to mean for a backup
+	// Tool.
 	resumed := litestream.NewDB(filepath.Join(dir, "db"))
 	resumed.MonitorInterval = 0
 	resumed.Replica = litestream.NewReplica(resumed)
@@ -310,9 +310,9 @@ func TestStore_Close_InterruptedUpload_EarlierBackupRestores(t *testing.T) {
 	}
 }
 
-// committed lists the final-name LTX files on the replica, ignoring temporaries.
+// Committed lists the final-name LTX files on the replica, ignoring temporaries.
 // An upload is temp-name-and-rename, so a file under a final name is a file the
-// replica has committed to; the set before and after an interruption is what
+// Replica has committed to; the set before and after an interruption is what
 // "no partial object was published" actually means.
 func committed(tb testing.TB, dir string) map[string]struct{} {
 	tb.Helper()

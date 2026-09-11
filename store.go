@@ -263,9 +263,9 @@ func (s *Store) Close(ctx context.Context) (err error) {
 
 	for _, db := range dbs {
 		// Each database bounds its own final sync and backs that bound with a
-		// transport teardown inside syncReplicaWithRetry, where the budget
-		// starts. No second clock covers the sequence: closing is sequential,
-		// so one would spend the first database's time out of the last's.
+		// Transport teardown inside syncReplicaWithRetry, where the budget
+		// Starts. No second clock covers the sequence: closing is sequential,
+		// So one would spend the first database's time out of the last's.
 		e := db.Close(ctx)
 
 		if e != nil {
@@ -280,12 +280,12 @@ func (s *Store) Close(ctx context.Context) (err error) {
 	}
 
 	// Cancel background work, then tear the transports down before waiting on
-	// it. Cancellation alone is not enough: a compaction parked in an SFTP
-	// write observes no context and waits for as long as the peer stays
-	// silent.
+	// It. Cancellation alone is not enough: a compaction parked in an SFTP
+	// Write observes no context and waits for as long as the peer stays
+	// Silent.
 	//
 	// Unconditional and terminal — every final sync above has finished or
-	// failed. It does not imply they succeeded; db.Close reports that.
+	// Failed. It does not imply they succeeded; db.Close reports that.
 	s.cancel()
 	for _, db := range dbs {
 		if db.Replica != nil && db.Replica.Client != nil {
@@ -609,9 +609,9 @@ func (s *Store) monitorCompactionLevel(ctx context.Context, lvl *CompactionLevel
 				notReadyDBs = append(notReadyDBs, db.Path())
 			case errors.Is(err, ErrClientAborted):
 				// A compaction interrupted by shutdown is routine: it is redone
-				// on the next start and nothing is lost. An interrupted final
-				// sync is a different matter and stays visible — db.Close
-				// reports it per database.
+				// On the next start and nothing is lost. An interrupted final
+				// Sync is a different matter and stays visible — db.Close
+				// Reports it per database.
 				db.Logger.Debug("compaction interrupted by shutdown", "level", lvl.Level)
 			case err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
 				db.Logger.Error("compaction failed", "level", lvl.Level, "error", err)

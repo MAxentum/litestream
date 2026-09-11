@@ -1,0 +1,18 @@
+goroutine 55 [chan receive]:
+github.com/pkg/sftp.(*clientConn).sendPacket(0x514564136120, 0x0, {0x100e79568, 0x51456451e1c0})
+	/Users/maxim/go/pkg/mod/github.com/pkg/sftp@v1.13.6/conn.go:137 +0x84
+github.com/pkg/sftp.(*File).writeChunkAt(0x51456451e080, 0x0, {0x514564152150, 0x64, 0x70}, 0x0)
+	/Users/maxim/go/pkg/mod/github.com/pkg/sftp@v1.13.6/client.go:1478 +0x104
+github.com/pkg/sftp.(*File).WriteAt(0x100d47d87?, {0x514564152150?, 0x5145642ab8d8?, 0x1001db214?}, 0x109d2c6b8?)
+	/Users/maxim/go/pkg/mod/github.com/pkg/sftp@v1.13.6/client.go:1632 +0x9c
+github.com/pkg/sftp.(*File).Write(0x51456451e080, {0x514564152150?, 0x5145642ab901?, 0x1001e84b0?})
+	/Users/maxim/go/pkg/mod/github.com/pkg/sftp@v1.13.6/client.go:1472 +0xc8
+bytes.(*Buffer).WriteTo(0x514564302060, {0x100e768a0?, 0x51456451e080?})
+	/opt/homebrew/Cellar/go/1.26.1/libexec/src/bytes/buffer.go:279 +0x70
+io.copyBuffer({0x100e768a0, 0x51456451e080}, {0x100e76880, 0x514564302060}, {0x51456413e000, 0x8000, 0x8000})
+	/opt/homebrew/Cellar/go/1.26.1/libexec/src/io/io.go:411 +0x98
+io.(*multiReader).writeToWithBuffer(0x514564308030, {0x100e768a0, 0x51456451e080}, {0x51456413e000, 0x8000, 0x8000})
+	/opt/homebrew/Cellar/go/1.26.1/libexec/src/io/multi.go:54 +0xcc
+io.(*multiReader).WriteTo(0x514564308030, {0x100e768a0, 0x51456451e080})
+	/opt/homebrew/Cellar/go/1.26.1/libexec/src/io/multi.go:45 +0x54
+io.copyBuffer({0x100e768a0, 0x51456451e080}, {0x100e768e0, 0x514564308030}, {0x0, 0x0, 0x0})

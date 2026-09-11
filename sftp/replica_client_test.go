@@ -18,13 +18,13 @@ import (
 	"github.com/benbjohnson/litestream/sftp"
 )
 
-// ltxFile builds a valid single-page LTX file.
+// LtxFile builds a valid single-page LTX file.
 //
 // WriteLTXFile peeks at the header before it opens anything remote, so an
-// invalid payload fails locally and never reaches the transport — a test using
-// one would prove nothing about a stalled upload.
-// ltxFileOfSize builds a valid LTX file of roughly n bytes, so an upload is
-// big enough for pkg/sftp to consider writing it concurrently.
+// Invalid payload fails locally and never reaches the transport — a test using
+// One would prove nothing about a stalled upload.
+// LtxFileOfSize builds a valid LTX file of roughly n bytes, so an upload is
+// Big enough for pkg/sftp to consider writing it concurrently.
 func ltxFileOfSize(tb testing.TB, n int) []byte {
 	tb.Helper()
 
@@ -53,7 +53,7 @@ func ltxFileOfSize(tb testing.TB, n int) []byte {
 	page := make([]byte, pageSize)
 	for i := 1; i <= pages; i++ {
 		// Vary the bytes: an all-zero file compresses to nothing and the
-		// upload stops being large enough to be the thing under test.
+		// Upload stops being large enough to be the thing under test.
 		for j := range page {
 			page[j] = byte(i * j)
 		}
@@ -106,8 +106,8 @@ func newClient(tb testing.TB, srv *testServer) *sftp.ReplicaClient {
 	return c
 }
 
-// newClientAt is newClient at a named path, so two independent clients can be
-// pointed at the same replica directory — one writing, one restoring.
+// NewClientAt is newClient at a named path, so two independent clients can be
+// Pointed at the same replica directory — one writing, one restoring.
 func newClientAt(tb testing.TB, srv *testServer, name string) *sftp.ReplicaClient {
 	tb.Helper()
 	c := newClient(tb, srv)
@@ -115,7 +115,7 @@ func newClientAt(tb testing.TB, srv *testServer, name string) *sftp.ReplicaClien
 	return c
 }
 
-// write starts an upload of a valid LTX file and reports how it ended.
+// Write starts an upload of a valid LTX file and reports how it ended.
 func write(tb testing.TB, c *sftp.ReplicaClient) <-chan error {
 	tb.Helper()
 	body := ltxFile(tb)
@@ -127,14 +127,14 @@ func write(tb testing.TB, c *sftp.ReplicaClient) <-chan error {
 	return ch
 }
 
-// reached waits until the server reports arriving at the phase it is set to
-// stall in, then checks the operation has not returned.
+// Reached waits until the server reports arriving at the phase it is set to
+// Stall in, then checks the operation has not returned.
 //
 // This replaces sleeping for a couple of seconds and asserting nothing
-// happened. Not returning for two seconds is not evidence of being blocked —
-// it is evidence of two seconds — and it made the suite slow for a weaker
-// claim. The server's own signal names the phase, so the test says WHERE the
-// operation is parked rather than how long it sat there.
+// Happened. Not returning for two seconds is not evidence of being blocked —
+// It is evidence of two seconds — and it made the suite slow for a weaker
+// Claim. The server's own signal names the phase, so the test says where the
+// Operation is parked rather than how long it sat there.
 func reached(tb testing.TB, srv *testServer, ch <-chan error, what string) {
 	tb.Helper()
 	select {
@@ -163,16 +163,16 @@ func mustReturn(tb testing.TB, ch <-chan error, d time.Duration, what string) er
 }
 
 // The Stall Happens Mid-Upload: the handshake succeeds, the file opens, and
-// then the server stops answering a WRITE. This is the production failure, and
-// the one an "abort" that only closes the SFTP client cannot release.
+// Then the server stops answering a WRITE. This is the production failure, and
+// The one an "abort" that only closes the SFTP client cannot release.
 func TestReplicaClient_Abort_StalledWrite(t *testing.T) {
 	srv := startTestServer(t, stallAtWrite)
 	c := newClient(t, srv)
 	ch := write(t, c)
 
 	// Wait until the server has actually received a WRITE. Aborting on a timer
-	// would pass whether or not the upload ever got that far, which is exactly
-	// how an earlier version of this test passed while testing nothing.
+	// Would pass whether or not the upload ever got that far, which is exactly
+	// How an earlier version of this test passed while testing nothing.
 	select {
 	case <-srv.writeReached:
 	case err := <-ch:
@@ -193,8 +193,8 @@ func TestReplicaClient_Abort_StalledWrite(t *testing.T) {
 }
 
 // The SSH Handshake Is Its Own Hang. A server that accepts TCP and never
-// speaks SSH parks the client before there is any SSH or SFTP object to close —
-// which is why the raw connection is dialled and published first.
+// Speaks SSH parks the client before there is any SSH or SFTP object to close —
+// Which is why the raw connection is dialled and published first.
 func TestReplicaClient_Abort_StalledSSHHandshake(t *testing.T) {
 	srv := startTestServer(t, stallAtBanner)
 	c := newClient(t, srv)
@@ -219,7 +219,7 @@ func TestReplicaClient_Abort_StalledSFTPInit(t *testing.T) {
 
 // A Connection That Arrives After An Abort Must Be Closed By Whoever Made It.
 // Abort can only close what has been published; a connect in flight publishes
-// under the same lock and, finding the client aborted, throws its work away.
+// Under the same lock and, finding the client aborted, throws its work away.
 // Run repeatedly so the abort lands at different points of the handshake.
 func TestReplicaClient_Abort_DuringConnect(t *testing.T) {
 	for i := 0; i < 25; i++ {
@@ -230,7 +230,7 @@ func TestReplicaClient_Abort_DuringConnect(t *testing.T) {
 
 		err := mustReturn(t, ch, 10*time.Second, "write racing an abort")
 		// Either it beat the abort or it was aborted; it must never hang, and
-		// the client must never be left usable.
+		// The client must never be left usable.
 		_ = err
 		if err := c.Init(context.Background()); !errors.Is(err, litestream.ErrClientAborted) {
 			t.Fatalf("iteration %d: client usable after Abort: %v", i, err)
@@ -239,8 +239,8 @@ func TestReplicaClient_Abort_DuringConnect(t *testing.T) {
 }
 
 // An Error From An Old Connection Must Not Close The New One. The client
-// tags each connection with a generation for exactly this: a late failure tears
-// down the transport it came from, or nothing at all.
+// Tags each connection with a generation for exactly this: a late failure tears
+// Down the transport it came from, or nothing at all.
 func TestReplicaClient_LateError_DoesNotDropNewConnection(t *testing.T) {
 	srv := startTestServer(t, serveFully)
 	c := newClient(t, srv)
@@ -261,7 +261,7 @@ func TestReplicaClient_LateError_DoesNotDropNewConnection(t *testing.T) {
 	}
 
 	// The old operation reports its failure now, long after its connection was
-	// replaced.
+	// Replaced.
 	c.DropGeneration(first)
 
 	if got := c.Generation(); got != second {
@@ -273,10 +273,10 @@ func TestReplicaClient_LateError_DoesNotDropNewConnection(t *testing.T) {
 }
 
 // TestReplicaClient_Abort_StalledDial covers the window before there is any
-// socket: the client is dialling, and Abort has nothing to close.
+// Socket: the client is dialling, and Abort has nothing to close.
 //
 // The dialer is injected because a dial that never returns cannot be produced
-// reliably against a real network.
+// Reliably against a real network.
 func TestReplicaClient_Abort_StalledDial(t *testing.T) {
 	c := newClient(t, startTestServer(t, serveFully))
 	c.DialTimeout = time.Hour // the deadline must not be what rescues this
@@ -302,12 +302,12 @@ func TestReplicaClient_Abort_StalledDial(t *testing.T) {
 	c.Abort()
 	err := mustReturn(t, ch, 10*time.Second, "stalled dial")
 
-	// ⛔ THE ERROR IDENTITY IS PART OF THE CONTRACT, AND THIS PHASE HAD ITS
-	// OWN. Every other phase reports a terminal abort as ErrClientAborted; the
-	// dial reported a bare context.Canceled, because cancellation is the abort
-	// MECHANISM here and the classifier only recognised transport failures.
+	// The error identity is part of The contract, and this phase had its
+	// Own. Every other phase reports a terminal abort as ErrClientAborted; the
+	// Dial reported a bare context.Canceled, because cancellation is the abort
+	// Mechanism here and the classifier only recognised transport failures.
 	// Asserting that the operation merely returns is what let the difference
-	// live.
+	// Live.
 	if !errors.Is(err, litestream.ErrClientAborted) {
 		t.Fatalf("an aborted dial did not report an abort: %v", err)
 	}
@@ -322,12 +322,11 @@ func TestReplicaClient_Abort_StalledDial(t *testing.T) {
 }
 
 // TestReplicaClient_ShortHeader_KeepsConnection covers the first of the two
-// ways a caller's stream can fail: it ends before the LTX header is complete.
+// Ways a caller's stream can fail: it ends before the LTX header is complete.
 //
-// ⛔ This used to be one test that handed WriteLTXFile the first half of a
-// valid file and asserted only that something failed. Half of a compressible
-// fixture is not a specified failure: it lands wherever the compressor happens
-// to put the midpoint, and nothing pinned which of the two error paths ran.
+// Half of a compressible fixture is not a specified failure: the midpoint
+// Lands wherever the compressor puts it, and nothing pins which of the two
+// Error paths runs. These two tests name the stage instead.
 func TestReplicaClient_ShortHeader_KeepsConnection(t *testing.T) {
 	c := newClient(t, startTestServer(t, serveFully))
 
@@ -363,9 +362,9 @@ func TestReplicaClient_ShortHeader_KeepsConnection(t *testing.T) {
 	}
 }
 
-// errAfter reads n bytes from r and then fails with err — a caller's file
-// going away mid-copy, which is the second way the input can fail and the one
-// that reaches the destination write path.
+// ErrAfter reads n bytes from r and then fails with err — a caller's file
+// Going away mid-copy, which is the second way the input can fail and the one
+// That reaches the destination write path.
 type errAfter struct {
 	r   io.Reader
 	n   int
@@ -388,12 +387,12 @@ func (e *errAfter) Read(p []byte) (int, error) {
 }
 
 // TestReplicaClient_SourceFailsMidBody_KeepsConnection covers the second way:
-// a complete header, some body, and then a read error from the caller.
+// A complete header, some body, and then a read error from the caller.
 //
-// ⛔ The identity of that error must survive. It is the caller's failure, not
-// the transport's: it must not be relabelled as an abort, must not drop a
-// connection other operations are using, and must be returned as itself so a
-// caller can tell a bad local file from a replica that has gone away.
+// The identity of that error must survive. It is the caller's failure, not
+// The transport's: it must not be relabelled as an abort, must not drop a
+// Connection other operations are using, and must be returned as itself so a
+// Caller can tell a bad local file from a replica that has gone away.
 func TestReplicaClient_SourceFailsMidBody_KeepsConnection(t *testing.T) {
 	c := newClient(t, startTestServer(t, serveFully))
 
@@ -435,14 +434,14 @@ func TestReplicaClient_SourceFailsMidBody_KeepsConnection(t *testing.T) {
 }
 
 // TestReplicaClient_Abort_DuringWalk asserts that a directory walk interrupted
-// by a terminal Abort reports the abort, rather than a bare error.
+// By a terminal Abort reports the abort, rather than a bare error.
 //
-// ⛔ THE WALK WAS THE ONE REMOTE PATH THAT CLASSIFIED NOTHING. DeleteAll's
-// walker error was returned as a plain fmt.Errorf, so a connection dying
-// mid-walk produced an error that isRemote could not recognise — invisible to
-// afterOp, which would otherwise drop the dead connection, and to abortedOr,
-// which would otherwise name the shutdown that caused it. Every other remote
-// failure in this client was tagged; this one only looked like it was.
+// The walk was the one remote path that classified nothing. DeleteAll's
+// Walker error was returned as a plain fmt.Errorf, so a connection dying
+// Mid-walk produced an error that isRemote could not recognise — invisible to
+// AfterOp, which would otherwise drop the dead connection, and to abortedOr,
+// Which would otherwise name the shutdown that caused it. Every other remote
+// Failure in this client was tagged; this one only looked like it was.
 func TestReplicaClient_Abort_DuringWalk(t *testing.T) {
 	srv := startTestServer(t, stallAtReadDir)
 	c := newClient(t, srv)
@@ -451,9 +450,9 @@ func TestReplicaClient_Abort_DuringWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ⛔ There must be something to walk. DeleteAll on a path that does not
-	// exist returns nil without a single READDIR, so the first version of this
-	// test finished before the server could stall and proved nothing.
+	// There must be something to walk: DeleteAll on a path that does not
+	// Exist returns nil without issuing a READDIR, so the server would never
+	// Reach the stall and the test would prove nothing.
 	if _, err := c.WriteLTXFile(context.Background(), 0, 1, 1, ltxFile(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +461,7 @@ func TestReplicaClient_Abort_DuringWalk(t *testing.T) {
 	go func() { ch <- c.DeleteAll(context.Background()) }()
 
 	// Wait until the walk is genuinely parked in a READDIR the server will
-	// never answer; aborting earlier would test the handshake instead.
+	// Never answer; aborting earlier would test the handshake instead.
 	select {
 	case <-srv.writeReached:
 	case err := <-ch:
@@ -482,14 +481,14 @@ func TestReplicaClient_Abort_DuringWalk(t *testing.T) {
 }
 
 // TestReplicaClient_PermissionError_KeepsItsIdentity asserts that a refusal
-// from the server keeps its own identity and its own connection, including
-// while the client is terminally aborted.
+// From the server keeps its own identity and its own connection, including
+// While the client is terminally aborted.
 //
-// ⛔ A SERVER SAYING NO IS NOT A TRANSPORT GOING AWAY. The two are easy to
-// conflate during shutdown, when an abort is in flight and every error is
-// tempting to attribute to it — but relabelling a permission failure as an
-// abort tells an operator the replica was torn down when in fact the replica
-// is refusing to accept their data, which is a fault that survives a restart.
+// A Server saying no is not A Transport going away. The two are easy to
+// Conflate during shutdown, when an abort is in flight and every error is
+// Tempting to attribute to it — but relabelling a permission failure as an
+// Abort tells an operator the replica was torn down when in fact the replica
+// Is refusing to accept their data, which is a fault that survives a restart.
 func TestReplicaClient_PermissionError_KeepsItsIdentity(t *testing.T) {
 	srv := startTestServer(t, serveFully)
 	c := newClient(t, srv)
@@ -500,7 +499,7 @@ func TestReplicaClient_PermissionError_KeepsItsIdentity(t *testing.T) {
 	gen := c.Generation()
 
 	// Make the replica directory unwritable on the server's real filesystem,
-	// so the next upload is refused rather than dropped.
+	// So the next upload is refused rather than dropped.
 	if err := os.MkdirAll(c.Path, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -521,15 +520,15 @@ func TestReplicaClient_PermissionError_KeepsItsIdentity(t *testing.T) {
 	}
 
 	// And the same refusal while the client is terminally aborted: the abort is
-	// real, but it is not what went wrong here.
+	// Real, but it is not what went wrong here.
 	c.Abort()
 	_, err = c.WriteLTXFile(context.Background(), 0, 2, 2, ltxFile(t))
 	if err == nil {
 		t.Fatal("expected the upload to fail on an aborted client")
 	}
 	// Once aborted, init refuses before the server is reached — that is the
-	// abort, correctly reported. The point of the first half is that the
-	// refusal reaching the server is never relabelled.
+	// Abort, correctly reported. The point of the first half is that the
+	// Refusal reaching the server is never relabelled.
 	if !errors.Is(err, litestream.ErrClientAborted) {
 		t.Fatalf("an aborted client did not report the abort: %v", err)
 	}
