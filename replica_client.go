@@ -15,13 +15,10 @@ import (
 
 var ErrStopIter = errors.New("stop iterator")
 
-// ErrClientAborted is returned by a replica client whose transport was torn
-// down by Abort, and wraps whatever the transport itself reported.
-//
-// It says how an operation ended, not whether that matters. Background work
-// interrupted this way — a compaction, a retention pass — is redone on the next
-// start and can be logged quietly; an interrupted final sync means recent
-// commits may not have reached the replica and must stay visible.
+// ErrClientAborted identifies operations interrupted by a client abort.
+// Returned errors may wrap this sentinel together with a transport error.
+// An interrupted final sync may leave recent commits unreplicated and must
+// remain visible to the caller.
 var ErrClientAborted = errors.New("replica client aborted")
 
 // ReplicaClient represents client to connect to a Replica.
@@ -62,14 +59,9 @@ type ReplicaClient interface {
 // ReplicaClientAborter is an optional interface for replica clients that hold a
 // network transport of their own.
 //
-// Abort tears that transport down so that operations already blocked inside it
-// fail immediately. It exists because context cancellation cannot reach a call
-// that is parked in a library without context support: an SFTP write waiting
-// for its response packet observes nothing but the connection dropping.
-//
-// Abort must be safe to call concurrently with in-flight operations, and a
-// client that has been aborted must not reconnect — it is called during
-// shutdown, where a fresh connection would only be blocked in turn.
+// Abort closes the transport to interrupt blocked I/O that does not observe
+// context cancellation. It must be safe to call concurrently with in-flight
+// operations. An aborted client must not reconnect.
 type ReplicaClientAborter interface {
 	Abort()
 }

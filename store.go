@@ -608,10 +608,8 @@ func (s *Store) monitorCompactionLevel(ctx context.Context, lvl *CompactionLevel
 				db.Logger.Debug("db not ready, skipping", "level", lvl.Level, "path", db.Path(), "error", err)
 				notReadyDBs = append(notReadyDBs, db.Path())
 			case errors.Is(err, ErrClientAborted):
-				// A compaction interrupted by shutdown is routine: it is redone
-				// on the next start and nothing is lost. An interrupted final
-				// sync is a different matter and stays visible — db.Close
-				// reports it per database.
+				// Interrupted compaction can be retried after restart. Final-sync
+				// failures remain visible through DB.Close's returned error.
 				db.Logger.Debug("compaction interrupted by shutdown", "level", lvl.Level)
 			case err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
 				db.Logger.Error("compaction failed", "level", lvl.Level, "error", err)
