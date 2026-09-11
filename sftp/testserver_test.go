@@ -16,7 +16,7 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-// Stall says how far a test server gets before it goes silent.
+// stall says how far a test server gets before it goes silent.
 type stall int
 
 const (
@@ -28,31 +28,31 @@ const (
 	stallAtReadDir                     // answers until the first READDIR, then goes quiet
 )
 
-// TestServer is an SSH/SFTP server that can be made to stop answering at a
-// Chosen point. The point matters: each stall parks the client in a different
-// Place, and a fix that releases one can leave the others hanging.
+// testServer is an SSH/SFTP server that can be made to stop answering at a
+// chosen point. The point matters: each stall parks the client in a different
+// place, and a fix that releases one can leave the others hanging.
 type testServer struct {
 	addr    string
 	hostKey string
 
-	// WriteReached is closed once the server has actually received an
+	// writeReached is closed once the server has actually received an
 	// SSH_FXP_WRITE. A test that aborts before this has not tested a stalled
-	// Write.
+	// write.
 	writeReached chan struct{}
 
-	// Reached is closed once the server has arrived at the phase it is
-	// Configured to stall in. A test waits on this rather than sleeping: a
-	// Second of not returning is not evidence of being blocked, and a signal
-	// Naming the phase is.
+	// reached is closed once the server has arrived at the phase it is
+	// configured to stall in. A test waits on THIS rather than sleeping: a
+	// second of not returning is not evidence of being blocked, and a signal
+	// naming the phase is.
 	reached   chan struct{}
 	reachedAt sync.Once
 
-	// Root is the directory the server serves; the client's Path must be
-	// Inside it, since pkg/sftp resolves absolute paths against the real
-	// Filesystem.
+	// root is the directory the server serves; the client's Path must be
+	// inside it, since pkg/sftp resolves absolute paths against the real
+	// filesystem.
 	root string
 
-	// Counter is installed only in countConcurrentWrites mode.
+	// counter is installed only in countConcurrentWrites mode.
 	counter *countWrites
 }
 
@@ -90,17 +90,17 @@ func startTestServer(tb testing.TB, mode stall) *testServer {
 	}
 
 	// Closing the listener does not close accepted sockets, and a parked
-	// Reader is not released by either; both are tracked and freed here.
+	// reader is not released by either; both are tracked and freed here.
 	stop := make(chan struct{})
 	var mu sync.Mutex
 	var accepted []net.Conn
 	closing := false // guarded by mu
 
-	// Closing is A state, not A moment. Accept can return a socket in the
-	// Window between ln.Close() and the loop below draining `accepted`: the
-	// Accepting goroutine then registers it after cleanup has finished and
-	// Nothing ever closes it. The flag is read under the same mutex that
-	// Guards the slice, so a socket is either drained here or closed there.
+	// Closing is a state, not a moment. Accept can return a socket in the
+	// window between ln.Close() and the loop below draining accepted, and the
+	// accepting goroutine would then register it after cleanup has finished,
+	// leaving it open. The flag is read under the same mutex that guards the
+	// slice, so a socket is either drained here or closed there.
 	var serving sync.WaitGroup
 	accepting := make(chan struct{})
 
@@ -117,8 +117,8 @@ func startTestServer(tb testing.TB, mode stall) *testServer {
 		}
 		mu.Unlock()
 		// Join the session goroutines before this cleanup returns: t.TempDir
-		// Registered its own removal before this one, so lifo runs it after —
-		// But only if nothing is still serving out of that directory.
+		// registered its own removal BEFORE this one, so LIFO runs it after —
+		// but only if nothing is still serving out of that directory.
 		serving.Wait()
 	})
 
@@ -162,12 +162,11 @@ func serveSSH(conn net.Conn, config *gossh.ServerConfig, mode stall, root string
 		return
 	}
 
-	// The children are the work. Joining only this function proves nothing:
-	// Everything that touches the served directory runs in goroutines started
-	// Below, so a parent that returns while they are still reading leaves
-	// T.TempDir removing a directory the server is using. Declared first so it
-	// Runs last — the connection is closed before the wait, or the wait never
-	// Ends.
+	// The children are the work: everything that touches the served directory
+	// runs in goroutines started below, so joining only this function would let
+	// t.TempDir remove a directory the server is still reading. Declared first
+	// so it runs last, after the connection is closed; otherwise the wait never
+	// ends.
 	var children sync.WaitGroup
 	defer children.Wait()
 	defer serverConn.Close()
@@ -240,12 +239,12 @@ type nopWriteCloser struct{ w io.Writer }
 func (n nopWriteCloser) Write(p []byte) (int, error) { return n.w.Write(p) }
 func (n nopWriteCloser) Close() error                { return nil }
 
-// StopAtWrite passes SFTP traffic through until the client sends its first
+// stopAtWrite passes SFTP traffic through until the client sends its first
 // WRITE packet, and then stops feeding the server, so the request is never
-// Answered and the client's write parks waiting for a reply.
+// answered and the client's write parks waiting for a reply.
 //
 // This is the production failure shape: the handshake succeeds, the file opens,
-// And the stall happens mid-upload.
+// and the stall happens mid-upload.
 type stopAtWrite struct {
 	r    io.Reader
 	w    io.Writer
@@ -267,8 +266,8 @@ const (
 // Read serves one SFTP packet at a time, buffering whatever does not fit in p.
 //
 // The server reads the four-byte length header separately from the body, so a
-// Wrapper that discards the remainder of a packet strands the body and stalls
-// The handshake rather than the write. Leftovers are served on the next call.
+// wrapper that discards the remainder of a packet strands the body and stalls
+// the handshake rather than the write. Leftovers are served on the next call.
 func (s *stopAtWrite) Read(p []byte) (int, error) {
 	s.mu.Lock()
 	if len(s.pending) > 0 {
@@ -318,13 +317,13 @@ func (s *stopAtWrite) Read(p []byte) (int, error) {
 
 func (s *stopAtWrite) Write(p []byte) (int, error) { return s.w.Write(p) }
 
-// CountWrites passes everything through and reports the greatest number of
+// countWrites passes everything through and reports the greatest number of
 // WRITE requests the client had outstanding at once.
 //
-// Reaching File.ReadFrom does not make an upload concurrent — pkg/sftp
-// Decides that from what the reader says about its size, and then writes
-// Either in parallel or in a sequential loop. Only the wire shows which
-// Happened: sequential means one request outstanding at a time.
+// Reaching File.ReadFrom does not make an upload concurrent. pkg/sftp decides
+// that from what the reader says about its size, then writes either in parallel
+// or in a sequential loop, and only the wire shows which happened: sequential
+// means one request outstanding at a time.
 type countWrites struct {
 	r io.Reader
 	w io.Writer
@@ -375,14 +374,13 @@ func (c *countWrites) Read(p []byte) (int, error) {
 }
 
 // Write watches the replies, framing them the same way the request side is
-// Framed.
+// framed.
 //
-// The first version of This counter peeked at p[4] and assumed one packet
-// Per Write call. Replies are a byte stream: a header can arrive without its
-// Body, and several packets can arrive together. Missed decrements make the
-// Outstanding count climb on its own, so the counter reported concurrency for
-// A sequential upload — and it was caught only because removing the code it
-// Was meant to test did not change its answer.
+// Replies are a byte stream: a header can arrive without its body, and several
+// packets can arrive in one call, so the reply side has to be framed the same
+// way the request side is. Reading a fixed offset instead misses decrements,
+// and the outstanding count then climbs on its own, reporting concurrency for
+// a sequential upload.
 func (c *countWrites) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	c.replies = append(c.replies, p...)

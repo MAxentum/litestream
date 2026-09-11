@@ -9,8 +9,8 @@ import (
 )
 
 // The remoteWriter wrapper hides *sftp.File's ReadFrom from io.Copy's
-// Dispatch, which is the optimised (and with ConcurrentWrites, the parallel)
-// Upload path. This measures what hiding it costs.
+// dispatch, which is the optimised (and with ConcurrentWrites, the parallel)
+// upload path. This measures what hiding it costs.
 func benchCopy(b *testing.B, wrap bool) {
 	srv := startTestServer(b, serveFully)
 	c := newClient(b, srv)
@@ -37,7 +37,7 @@ func benchCopy(b *testing.B, wrap bool) {
 			dst = struct{ io.Writer }{f}
 		}
 		// The source must not implement io.WriterTo, or io.Copy never asks the
-		// Destination for ReadFrom and both arms measure the same path.
+		// destination for ReadFrom and both arms measure the same path.
 		src := struct{ io.Reader }{bytes.NewReader(payload)}
 		if _, err := io.Copy(dst, src); err != nil {
 			b.Fatal(err)

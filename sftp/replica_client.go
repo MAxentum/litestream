@@ -40,20 +40,20 @@ var _ litestream.ReplicaClient = (*ReplicaClient)(nil)
 
 // ReplicaClient is a client for writing LTX files over SFTP.
 type ReplicaClient struct {
-	// Mu serialises connection setup. Abort must never take it: setup holds it
-	// Across the dial and both handshakes, which is when an abort is needed.
+	// mu serialises connection setup. Abort must never take it: setup holds it
+	// across the dial and both handshakes, which is when an abort is needed.
 	mu sync.Mutex
 
-	// ConnMu guards the fields below and is never held across a network call.
+	// connMu guards the fields below and is never held across a network call.
 	// The abort flag and the published connection share it so that checking
-	// For an abort and publishing a handle is one atomic step; otherwise a
-	// Connection established just after an abort is never closed.
+	// for an abort and publishing a handle is one atomic step; otherwise a
+	// connection established just after an abort is never closed.
 	connMu  sync.Mutex
 	aborted bool
 	cur     *conn
 	lastGen uint64
 
-	// Dial establishes the TCP connection. Replaceable in tests.
+	// dial establishes the TCP connection. Replaceable in tests.
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
 
 	logger *slog.Logger
@@ -110,14 +110,14 @@ func NewReplicaClientFromURL(scheme, host, urlPath string, query url.Values, use
 	return client, nil
 }
 
-// Conn is one transport instance, from the TCP connection up. It carries a
-// Generation so that an error arriving late, from a connection that has since
-// Been replaced, tears down that connection and not its successor.
+// conn is one transport instance, from the TCP connection up. It carries a
+// generation so that an error arriving late, from a connection that has since
+// been replaced, tears down that connection and not its successor.
 type conn struct {
 	gen uint64
 
-	// Cancel aborts a dial that has not returned. Registered before dialling:
-	// Until DialContext returns there is no socket for Abort to close.
+	// cancel aborts a dial that has not returned. Registered before dialling:
+	// until DialContext returns there is no socket for Abort to close.
 	cancel context.CancelFunc
 
 	raw  net.Conn
@@ -125,9 +125,9 @@ type conn struct {
 	sftp *sftp.Client
 }
 
-// Close tears the instance down, raw connection first. Closing an SFTP client
-// Waits on its own receive goroutine, which is what a stalled peer leaves
-// Parked; dropping the socket underneath makes every layer above fail at once.
+// close tears the instance down, raw connection first. Closing an SFTP client
+// waits on its own receive goroutine, which is what a stalled peer leaves
+// parked; dropping the socket underneath makes every layer above fail at once.
 func (c *conn) close() {
 	if c == nil {
 		return
@@ -147,8 +147,8 @@ func (c *conn) close() {
 	}
 }
 
-// Begin registers a new connection instance, or reports that the client has
-// Been aborted. The caller must close what it holds if this returns an error.
+// begin registers a new connection instance, or reports that the client has
+// been aborted. The caller must close what it holds if this returns an error.
 func (c *ReplicaClient) begin() (*conn, error) {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -160,10 +160,10 @@ func (c *ReplicaClient) begin() (*conn, error) {
 	return c.cur, nil
 }
 
-// Publish stores a newly built layer on the connection instance, under the same
-// Lock Abort takes. It fails if the client was aborted or the instance is no
-// Longer current; the caller then closes what it built, since nobody else
-// Knows the connection exists.
+// publish stores a newly built layer on the connection instance, under the same
+// lock Abort takes. It fails if the client was aborted or the instance is no
+// longer current; the caller then closes what it built, since nobody else
+// knows the connection exists.
 func (c *ReplicaClient) publish(instance *conn, apply func(*conn)) error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -177,7 +177,7 @@ func (c *ReplicaClient) publish(instance *conn, apply func(*conn)) error {
 	return nil
 }
 
-// Live returns the usable SFTP client and its generation, if there is one.
+// live returns the usable SFTP client and its generation, if there is one.
 func (c *ReplicaClient) live() (*sftp.Client, uint64) {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -187,9 +187,9 @@ func (c *ReplicaClient) live() (*sftp.Client, uint64) {
 	return c.cur.sftp, c.cur.gen
 }
 
-// Drop tears down the connection instance of the given generation, if it is
-// Still current. Without the generation check, a slow operation reporting an
-// Error from a replaced transport would close its replacement.
+// drop tears down the connection instance of the given generation, if it is
+// still current. Without the generation check, a slow operation reporting an
+// error from a replaced transport would close its replacement.
 func (c *ReplicaClient) drop(gen uint64) {
 	c.connMu.Lock()
 	var doomed *conn
@@ -201,7 +201,7 @@ func (c *ReplicaClient) drop(gen uint64) {
 }
 
 // Abort closes the transport so that operations blocked inside it fail, and
-// Marks the client so nothing reconnects behind the shutdown.
+// marks the client so nothing reconnects behind the shutdown.
 //
 // It implements litestream.ReplicaClientAborter.
 func (c *ReplicaClient) Abort() {
@@ -231,8 +231,8 @@ func (c *ReplicaClient) Init(ctx context.Context) error {
 	return err
 }
 
-// Init initializes the connection and returns the SFTP client with the
-// Generation it belongs to.
+// init initializes the connection and returns the SFTP client with the
+// generation it belongs to.
 func (c *ReplicaClient) init(ctx context.Context) (_ *sftp.Client, _ uint64, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -242,16 +242,16 @@ func (c *ReplicaClient) init(ctx context.Context) (_ *sftp.Client, _ uint64, err
 	}
 
 	// Registering the instance is also the abort check: after Abort this
-	// Fails, so a shutdown is never followed by a fresh connection that the
-	// Next operation can park in.
+	// fails, so a shutdown is never followed by a fresh connection that the
+	// next operation can park in.
 	instance, err := c.begin()
 	if err != nil {
 		return nil, 0, err
 	}
 	// One cleanup for every failure below, including the ones that never
-	// Reach the network (no user, bad host key, unreadable key file): leaving a
-	// Registered instance with no handles behind would make `cur` describe a
-	// Connection that does not exist.
+	// reach the network (no user, bad host key, unreadable key file): leaving a
+	// registered instance with no handles behind would make `cur` describe a
+	// connection that does not exist.
 	defer func() {
 		if err != nil {
 			c.drop(instance.gen)
@@ -304,16 +304,16 @@ func (c *ReplicaClient) init(ctx context.Context) (_ *sftp.Client, _ uint64, err
 
 	// The raw connection is dialled and published before any handshake.
 	//
-	// Ssh.Dial performs the TCP connect, banner exchange, key exchange and
-	// Authentication in one call and returns nothing until all of it finishes.
+	// ssh.Dial performs the TCP connect, banner exchange, key exchange and
+	// authentication in one call and returns nothing until all of it finishes.
 	// A server that accepts TCP and then goes quiet leaves that call parked
-	// With no handle to close, so Abort has nothing to act on. Dialling here
-	// Means the socket exists, and is abortable, before any handshake byte is
-	// Sent.
+	// with no handle to close, so Abort has nothing to act on. Dialling here
+	// means the socket exists, and is abortable, before any handshake byte is
+	// sent.
 	//
 	// Register the cancel before dialling. Between here and DialContext
-	// Returning there is no socket, so cancellation is the only way an abort
-	// Can reach this connection.
+	// returning there is no socket, so cancellation is the only way an abort
+	// can reach this connection.
 	dialCtx, dialCancel := context.WithCancel(ctx)
 	if err := c.publish(instance, func(cn *conn) { cn.cancel = dialCancel }); err != nil {
 		dialCancel()
@@ -328,8 +328,8 @@ func (c *ReplicaClient) init(ctx context.Context) (_ *sftp.Client, _ uint64, err
 	raw, err := dial(dialCtx, "tcp", host)
 	if err != nil {
 		// An abort during the dial arrives as context.Canceled, which is not a
-		// Transport error. Attribute it here, at the boundary that owns the
-		// Cancel, rather than widening the classification elsewhere.
+		// transport error. Attribute it here, at the boundary that owns the
+		// cancel, rather than widening the classification elsewhere.
 		if c.Aborted() && errors.Is(err, context.Canceled) {
 			return nil, 0, fmt.Errorf("%w (%w)", litestream.ErrClientAborted, err)
 		}
@@ -341,9 +341,9 @@ func (c *ReplicaClient) init(ctx context.Context) (_ *sftp.Client, _ uint64, err
 	}
 
 	// One deadline across Both handshakes. An unanswered key exchange and an
-	// Unanswered SFTP init are the same outage as an unanswered Syn; it is
-	// Cleared only once the transport is fully established, because a deadline
-	// Left on a long-lived connection would break replication later.
+	// unanswered SFTP INIT are the same outage as an unanswered Syn; it is
+	// cleared only once the transport is fully established, because a deadline
+	// left on a long-lived connection would break replication later.
 	if c.DialTimeout > 0 {
 		_ = raw.SetDeadline(time.Now().Add(c.DialTimeout))
 	}
@@ -383,19 +383,19 @@ func (c *ReplicaClient) init(ctx context.Context) (_ *sftp.Client, _ uint64, err
 	return sftpClient, instance.gen, nil
 }
 
-// RemoteError marks an error as having come from the remote end — the dial, a
-// Handshake, or a call on the SSH or SFTP client — rather than from the
-// Caller's input reader or from LTX validation.
+// remoteError marks an error as having come from the remote end — the dial, a
+// handshake, or a call on the SSH or SFTP client — rather than from the
+// caller's input reader or from LTX validation.
 //
 // Only remote errors may drop the connection or be reported as an abort.
 // Without the distinction, a truncated LTX header reads as io.ErrUnexpectedEOF
-// And would tear down a healthy connection that other operations are using.
+// and would tear down a healthy connection that other operations are using.
 type remoteError struct{ err error }
 
 func (e remoteError) Error() string { return e.err.Error() }
 func (e remoteError) Unwrap() error { return e.err }
 
-// Remote tags an error as coming from the remote end.
+// remote tags an error as coming from the remote end.
 func remote(err error) error {
 	if err == nil {
 		return nil
@@ -408,9 +408,9 @@ func isRemote(err error) bool {
 	return errors.As(err, &r)
 }
 
-// RemoteWriter tags write failures as remote, so that io.Copy's two error
-// Sources stay distinguishable: a failure writing to the replica is the
-// Transport, a failure reading the source is the caller's.
+// remoteWriter tags write failures as remote, so that io.Copy's two error
+// sources stay distinguishable: a failure writing to the replica is the
+// transport, a failure reading the source is the caller's.
 type remoteWriter struct{ w io.Writer }
 
 func (w remoteWriter) Write(p []byte) (int, error) {
@@ -419,13 +419,13 @@ func (w remoteWriter) Write(p []byte) (int, error) {
 }
 
 // ReadFrom keeps io.Copy's optimised path reachable. Wrapping a destination
-// Hides its ReadFrom, and *sftp.File's ReadFrom is pkg/sftp's optimised
-// Upload, so a plain wrapper demotes uploads to a sequential loop.
+// hides its ReadFrom, and *sftp.File's ReadFrom is pkg/sftp's optimised
+// upload, so a plain wrapper demotes uploads to a sequential loop.
 //
 // Attribution still has to survive: ReadFrom both reads the caller's stream
-// And writes to the remote, so the single error it returns has two possible
-// Origins. The source is wrapped to record its own failure, and only an error
-// That is not the source's is tagged remote.
+// and writes to the remote, so the single error it returns has two possible
+// origins. The source is wrapped to record its own failure, and only an error
+// that is not the source's is tagged remote.
 func (w remoteWriter) ReadFrom(r io.Reader) (int64, error) {
 	rf, ok := w.w.(io.ReaderFrom)
 	if !ok {
@@ -433,10 +433,10 @@ func (w remoteWriter) ReadFrom(r io.Reader) (int64, error) {
 	}
 	lr := &localReader{r: r}
 
-	// Pkg/sftp decides whether to write concurrently by asking the reader how
-	// Much is left (Len, Size, *io.LimitedReader or Stat; see File.ReadFrom).
+	// pkg/sftp decides whether to write concurrently by asking the reader how
+	// much is left (Len, Size, *io.LimitedReader or Stat; see File.ReadFrom).
 	// A wrapper exposing none of those answers "unknown" and silently takes
-	// The sequential path, so the size is carried across.
+	// the sequential path, so the size is carried across.
 	var src io.Reader = lr
 	if size, ok := readerSize(r); ok {
 		src = sizedReader{localReader: lr, size: size}
@@ -449,10 +449,10 @@ func (w remoteWriter) ReadFrom(r io.Reader) (int64, error) {
 	return n, remote(err)
 }
 
-// ReaderSize reports what pkg/sftp would have learned from the unwrapped
-// Reader. The cases and their order mirror File.ReadFrom exactly; a negative
-// Result is meaningful there (it selects maximum concurrency) and is passed
-// Through rather than discarded.
+// readerSize reports what pkg/sftp would have learned from the unwrapped
+// reader. The cases and their order mirror File.ReadFrom exactly; a negative
+// result is meaningful there (it selects maximum concurrency) and is passed
+// through rather than discarded.
 func readerSize(r io.Reader) (int64, bool) {
 	switch r := r.(type) {
 	case interface{ Len() int }:
@@ -471,8 +471,8 @@ func readerSize(r io.Reader) (int64, bool) {
 	return 0, false
 }
 
-// LocalReader remembers the error its source returned, so a failure that came
-// Out of the caller's file is not reported as the replica going away.
+// localReader remembers the error its source returned, so a failure that came
+// out of the caller's file is not reported as the replica going away.
 type localReader struct {
 	r   io.Reader
 	err error
@@ -486,9 +486,9 @@ func (l *localReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// SizedReader is localReader with the size the original reader advertised.
+// sizedReader is localReader with the size the original reader advertised.
 // Size is the second case pkg/sftp probes and the one every other case can be
-// Expressed as, so one shape carries all four.
+// expressed as, so one shape carries all four.
 type sizedReader struct {
 	*localReader
 	size int64
@@ -496,12 +496,12 @@ type sizedReader struct {
 
 func (s sizedReader) Size() int64 { return s.size }
 
-// AbortedOr reports err as an abort when the client has been aborted and the
-// Failure is the remote transport going away underneath it.
+// abortedOr reports err as an abort when the client has been aborted and the
+// failure is the remote transport going away underneath it.
 //
 // Narrow deliberately: a permission error, a malformed LTX file or a local disk
-// Failure that coincides with a stop keeps its own identity and its own log
-// Level.
+// failure that coincides with a stop keeps its own identity and its own log
+// level.
 func (c *ReplicaClient) abortedOr(err error) error {
 	if err == nil || !isRemote(err) || !c.Aborted() || !isTransportError(err) {
 		return err
@@ -509,8 +509,8 @@ func (c *ReplicaClient) abortedOr(err error) error {
 	return fmt.Errorf("%w (%w)", litestream.ErrClientAborted, err)
 }
 
-// IsTransportError reports whether err is the connection going away rather than
-// The server refusing something. It is only ever consulted for remote errors.
+// isTransportError reports whether err is the connection going away rather than
+// the server refusing something. It is only ever consulted for remote errors.
 func isTransportError(err error) bool {
 	switch {
 	case errors.Is(err, sftp.ErrSSHFxConnectionLost),
@@ -521,7 +521,7 @@ func isTransportError(err error) bool {
 		errors.Is(err, syscall.EPIPE):
 		return true
 	}
-	// X/crypto/ssh and pkg/sftp report some teardowns as bare strings.
+	// x/crypto/ssh and pkg/sftp report some teardowns as bare strings.
 	msg := err.Error()
 	return strings.Contains(msg, "use of closed network connection") ||
 		strings.Contains(msg, "connection lost")
@@ -544,7 +544,7 @@ func (c *ReplicaClient) DeleteAll(ctx context.Context) (err error) {
 			continue
 		} else if err != nil {
 			// A walker error is a remote error: Walk issues ReadDir and Stat
-			// Over the wire, so a connection dying mid-walk surfaces here.
+			// over the wire, so a connection dying mid-walk surfaces here.
 			// Untagged it is invisible to afterOp and to abortedOr.
 			return remote(fmt.Errorf("sftp: cannot walk path %q: %w", walker.Path(), err))
 		}
@@ -660,7 +660,7 @@ func (c *ReplicaClient) WriteLTXFile(ctx context.Context, level int, minTXID, ma
 	}()
 
 	// The destination is tagged so that a failure writing to the replica is
-	// Distinguishable from a failure reading the caller's LTX stream.
+	// distinguishable from a failure reading the caller's LTX stream.
 	n, err := io.Copy(remoteWriter{w: f}, fullReader)
 	if err != nil {
 		return nil, err
@@ -761,14 +761,14 @@ func (c *ReplicaClient) Cleanup(ctx context.Context) (err error) {
 }
 
 // resetOnConnError closes & clears the client if a connection error occurs.
-// AfterOp runs on the way out of every operation. It drops the connection the
-// Operation used — identified by generation, so a late failure cannot tear down
-// A connection that has since replaced it — and classifies the error.
+// afterOp runs on the way out of every operation. It drops the connection the
+// operation used — identified by generation, so a late failure cannot tear down
+// a connection that has since replaced it — and classifies the error.
 //
 // Only remote transport failures drop the connection. This is narrower than the
-// Original behaviour in one respect and wider in another: it no longer resets
-// On any sftp.ErrSSHFxConnectionLost seen anywhere in an operation, and it now
-// Also covers a closed socket reported by the SSH layer.
+// original behaviour in one respect and wider in another: it no longer resets
+// on any sftp.ErrSSHFxConnectionLost seen anywhere in an operation, and it now
+// also covers a closed socket reported by the SSH layer.
 func (c *ReplicaClient) afterOp(gen uint64, err error) error {
 	if err == nil {
 		return nil

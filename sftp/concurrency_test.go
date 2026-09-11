@@ -9,17 +9,17 @@ import (
 )
 
 // TestWriteLTXFile_UploadsConcurrently asserts that an upload large enough to
-// Justify it actually issues overlapping WRITE requests.
+// justify it actually issues overlapping WRITE requests.
 //
-// This is The claim that reaching ReadFrom Does not establish. Pkg/sftp
-// V1.13.6 chooses between a concurrent upload and a sequential 32 KB loop by
-// Asking the reader how much is left (Len, Size, *io.LimitedReader or Stat).
-// A destination wrapper that hands it a reader exposing only Read gets the
-// Sequential path — the optimisation is entered and then declines itself, and
-// Every test that only checks the upload succeeded passes either way.
+// Reaching File.ReadFrom does not establish this on its own. pkg/sftp v1.13.6
+// chooses between a concurrent upload and a sequential 32 KB loop by asking the
+// reader how much is left (Len, Size, *io.LimitedReader or Stat), so a
+// destination wrapper handing it a reader that exposes only Read gets the
+// sequential path: the optimisation is entered and then declines itself. A test
+// that only checks the upload succeeded passes either way.
 //
-// The server counts WRITE requests that are outstanding at the same moment.
-// Sequential means exactly one.
+// The server counts WRITE requests outstanding at the same moment. Sequential
+// means exactly one.
 func TestWriteLTXFile_UploadsConcurrently(t *testing.T) {
 	srv := startTestServer(t, countConcurrentWrites)
 	c := newClient(t, srv)
@@ -29,16 +29,13 @@ func TestWriteLTXFile_UploadsConcurrently(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The source must not implement io.WriterTo, or this measures a
-	// Different mechanism entirely. A *bytes.Reader writes itself into the
-	// Destination in one 4 MB call, and File.Write parallelises a large single
-	// Write on its own — so the first version of this test reported four
-	// Concurrent requests with the fix removed, and with the whole ReadFrom
-	// Method removed. It was measuring File.Write, not File.ReadFrom.
+	// The source must not implement io.WriterTo, or this measures a different
+	// mechanism: a *bytes.Reader writes itself into the destination in one
+	// call, and File.Write parallelises a large single write on its own, so the
+	// result would describe File.Write rather than File.ReadFrom.
 	//
-	// A reader that can state its size but cannot write itself is exactly the
-	// Case the destination's ReadFrom exists for, and the case the wrapper
-	// Used to break.
+	// A reader that can state its size but cannot write itself is the case the
+	// destination's ReadFrom exists for.
 	body := ltxFileOfSize(t, 4<<20)
 	if _, err := c.WriteLTXFile(context.Background(), 0, 1, 1, sizedSource{r: bytes.NewReader(body), n: int64(len(body))}); err != nil {
 		t.Fatal(err)
@@ -52,9 +49,9 @@ func TestWriteLTXFile_UploadsConcurrently(t *testing.T) {
 }
 
 // TestWriteLTXFile_SequentialWhenSizeUnknown records the other half of the
-// Contract: a source that cannot say how much is left gets the sequential
-// Path, exactly as it would without the wrapper. The wrapper must not invent
-// A size.
+// contract: a source that cannot say how much is left gets the sequential
+// path, exactly as it would without the wrapper. The wrapper must not invent
+// a size.
 func TestWriteLTXFile_SequentialWhenSizeUnknown(t *testing.T) {
 	srv := startTestServer(t, countConcurrentWrites)
 	c := newClient(t, srv)
@@ -79,8 +76,8 @@ type readOnly struct{ r *bytes.Reader }
 
 func (r readOnly) Read(p []byte) (int, error) { return r.r.Read(p) }
 
-// SizedSource can say how big it is and cannot write itself: Read plus Size,
-// Deliberately no WriteTo.
+// sizedSource can say how big it is and cannot write itself: Read plus Size,
+// deliberately no WriteTo.
 type sizedSource struct {
 	r *bytes.Reader
 	n int64

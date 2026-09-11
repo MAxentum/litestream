@@ -10,7 +10,7 @@ import (
 // Generation reports the generation of the live connection, or zero.
 //
 // Test-only: connection lifecycle is the part of this client that is easy to
-// Get wrong and impossible to observe from outside.
+// get wrong and impossible to observe from outside.
 func (c *ReplicaClient) Generation() uint64 {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -21,17 +21,17 @@ func (c *ReplicaClient) Generation() uint64 {
 }
 
 // DropGeneration simulates an operation reporting a connection failure from the
-// Given generation.
+// given generation.
 func (c *ReplicaClient) DropGeneration(gen uint64) { c.drop(gen) }
 
 // SetDial replaces the TCP dialer. Test-only: a dial that never returns cannot
-// Be produced reliably against a real network.
+// be produced reliably against a real network.
 func (c *ReplicaClient) SetDial(fn func(ctx context.Context, network, addr string) (net.Conn, error)) {
 	c.dial = fn
 }
 
 // SFTPClientForTest exposes the live pkg/sftp client, so a benchmark can
-// Measure the copy path without going through WriteLTXFile's LTX validation.
+// measure the copy path without going through WriteLTXFile's LTX validation.
 func (c *ReplicaClient) SFTPClientForTest() *sftp.Client {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
