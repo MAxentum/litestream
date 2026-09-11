@@ -257,6 +257,8 @@ func (s *Store) Open(ctx context.Context) error {
 }
 
 func (s *Store) Close(ctx context.Context) (err error) {
+	s.cancel()
+
 	s.mu.Lock()
 	dbs := slices.Clone(s.dbs)
 	s.mu.Unlock()
@@ -279,22 +281,36 @@ func (s *Store) Close(ctx context.Context) (err error) {
 		}
 	}
 
-	// Cancel background work, then tear the transports down before waiting on
-	// it. Cancellation alone is not enough: a compaction parked in an SFTP
-	// write observes no context and waits for as long as the peer stays
-	// silent.
-	//
-	// Unconditional and terminal — every final sync above has finished or
-	// failed. It does not imply they succeeded; db.Close reports that.
-	s.cancel()
+	// Final syncs have finished or failed. Close supported transports to release
+	// blocked I/O before waiting for monitors; other clients rely on the
+	// interruptible wait below.
 	for _, db := range dbs {
 		if db.Replica != nil && db.Replica.Client != nil {
 			AbortReplicaClient(db.Replica.Client)
 		}
 	}
-	s.wg.Wait()
+	if e := s.waitForMonitors(ctx); e != nil && err == nil {
+		err = e
+	}
 
 	return err
+}
+
+func (s *Store) waitForMonitors(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-s.done:
+		return ErrShutdownInterrupted
+	}
 }
 
 func (s *Store) DBs() []*DB {
