@@ -262,11 +262,10 @@ func (s *Store) Close(ctx context.Context) (err error) {
 	s.mu.Unlock()
 
 	for _, db := range dbs {
-		// Each database bounds its own final sync, and backs that bound with a
-		// transport teardown from inside syncReplicaWithRetry — where the
-		// budget actually starts. Nothing here imposes a second clock over the
-		// sequence: closing is sequential, so one would spend the first
-		// database's time out of the last database's budget.
+		// Each database bounds its own final sync and backs that bound with a
+		// transport teardown inside syncReplicaWithRetry, where the budget
+		// starts. No second clock covers the sequence: closing is sequential,
+		// so one would spend the first database's time out of the last's.
 		e := db.Close(ctx)
 
 		if e != nil {
@@ -281,16 +280,12 @@ func (s *Store) Close(ctx context.Context) (err error) {
 	}
 
 	// Cancel background work, then tear the transports down before waiting on
-	// it.
+	// it. Cancellation alone is not enough: a compaction parked in an SFTP
+	// write observes no context and waits for as long as the peer stays
+	// silent.
 	//
-	// Cancellation alone is not enough: a background task blocked in a network
-	// round trip cannot observe the context. A compaction uploading an LTX file
-	// over SFTP sits in the client library waiting for a response packet, so
-	// waiting here first hangs for as long as the peer stays silent.
-	//
-	// This is unconditional and terminal: every final sync above has already
-	// finished or failed, and the store is being closed. It does not imply
-	// those syncs succeeded — db.Close reports that for each database.
+	// Unconditional and terminal — every final sync above has finished or
+	// failed. It does not imply they succeeded; db.Close reports that.
 	s.cancel()
 	for _, db := range dbs {
 		if db.Replica != nil && db.Replica.Client != nil {

@@ -896,19 +896,17 @@ func (db *DB) backstopReplicaTransport(syncCtx context.Context) (stop func()) {
 		return func() {}
 	}
 
-	// ⛔ Resolve the aborter ONCE, here. A client that cannot be aborted used
-	// to get a watcher goroutine and a warning announcing a teardown that
-	// never happened — the file and s3 clients logged "closing replica
-	// transport" on every timed-out shutdown and closed nothing.
+	// Resolve the aborter once. A client that cannot be aborted gets no
+	// watcher and no warning: announcing a teardown that never happened sends
+	// the reader looking for a connection nothing touched.
 	aborter, ok := db.Replica.Client.(ReplicaClientAborter)
 	if !ok {
 		return func() {}
 	}
 
-	// ⛔ At most one abort and one warning, however many reasons arrive. The
+	// At most one abort and one warning, however many reasons arrive: the
 	// watcher and the stop path can both find an abort owed, and stop itself
-	// can find BOTH the sync context and db.Done closed — three routes to the
-	// same terminal act, which is one act.
+	// can find both the sync context and db.Done closed.
 	var abortOnce sync.Once
 	abort := func(reason string) {
 		abortOnce.Do(func() {
