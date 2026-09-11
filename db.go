@@ -896,9 +896,8 @@ func (db *DB) Close(ctx context.Context) (err error) {
 // deadline expires or the shutdown is interrupted, and returns a function that
 // stops the watch and waits for it to finish.
 //
-// Ownership: only the transport is touched; the replica client itself stays
-// usable to the extent its implementation allows, and a client that does not
-// implement the aborter interface is unaffected.
+// Clients implementing ReplicaClientAborter become terminal after abort.
+// Clients without that interface are unaffected.
 func (db *DB) backstopReplicaTransport(syncCtx context.Context) (stop func()) {
 	if db.Replica == nil || db.Replica.Client == nil {
 		return func() {}

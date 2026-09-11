@@ -264,10 +264,8 @@ func (s *Store) Close(ctx context.Context) (err error) {
 	s.mu.Unlock()
 
 	for _, db := range dbs {
-		// Each database bounds its own final sync and backs that bound with a
-		// transport teardown inside syncReplicaWithRetry, where the budget
-		// starts. No second clock covers the sequence: closing is sequential,
-		// so one would spend the first database's time out of the last's.
+		// Each database applies its configured final-sync timeout independently.
+		// A zero timeout selects one attempt without a deadline.
 		e := db.Close(ctx)
 
 		if e != nil {

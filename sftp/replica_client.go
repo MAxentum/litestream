@@ -127,7 +127,7 @@ type conn struct {
 
 // close tears the instance down, raw connection first. Closing an SFTP client
 // waits on its own receive goroutine, which is what a stalled peer leaves
-// parked; dropping the socket underneath makes every layer above fail at once.
+// blocked. Closing the socket interrupts their network I/O.
 func (c *conn) close() {
 	if c == nil {
 		return
