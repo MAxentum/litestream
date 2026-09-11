@@ -760,15 +760,12 @@ func (c *ReplicaClient) Cleanup(ctx context.Context) (err error) {
 	return nil
 }
 
-// resetOnConnError closes & clears the client if a connection error occurs.
 // afterOp runs on the way out of every operation. It drops the connection the
 // operation used — identified by generation, so a late failure cannot tear down
 // a connection that has since replaced it — and classifies the error.
 //
-// Only remote transport failures drop the connection. This is narrower than the
-// original behaviour in one respect and wider in another: it no longer resets
-// on any sftp.ErrSSHFxConnectionLost seen anywhere in an operation, and it now
-// also covers a closed socket reported by the SSH layer.
+// Only remote transport failures drop the connection: a refusal from the server
+// and a failure reading the caller's input both keep it.
 func (c *ReplicaClient) afterOp(gen uint64, err error) error {
 	if err == nil {
 		return nil
